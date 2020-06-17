@@ -24,6 +24,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
+
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -119,8 +121,6 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 
 	private static final List<String> FORBIDDEN_BACKSLASH = Collections.unmodifiableList(Arrays.asList("\\", "%5c", "%5C"));
 
-	private static final List<String> FORBIDDEN_NULL = Collections.unmodifiableList(Arrays.asList("\0", "%00"));
-
 	private Set<String> encodedUrlBlocklist = new HashSet<>();
 
 	private Set<String> decodedUrlBlocklist = new HashSet<>();
@@ -129,11 +129,14 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 
 	private Predicate<String> allowedHostnames = hostname -> true;
 
-	private Predicate<String> allowedHeaderNames = name -> name.codePoints().allMatch(codePoint -> !Character.isISOControl(codePoint) && Character.isDefined(codePoint));
+	private static final Pattern ASSIGNED_AND_NOT_ISO_CONTROL_PATTERN = Pattern.compile("[\\p{IsAssigned}&&[^\\p{IsControl}]]*");
+	private static final Predicate<String> ASSIGNED_AND_NOT_ISO_CONTROL_PREDICATE = s -> ASSIGNED_AND_NOT_ISO_CONTROL_PATTERN.matcher(s).matches();
 
-	private Predicate<String> allowedHeaderValues = value -> value.codePoints().allMatch(codePoint -> !Character.isISOControl(codePoint) && Character.isDefined(codePoint));
+	private Predicate<String> allowedHeaderNames = ASSIGNED_AND_NOT_ISO_CONTROL_PREDICATE;
 
-	private Predicate<String> allowedParameterNames = name -> name.codePoints().allMatch(codePoint -> !Character.isISOControl(codePoint) && Character.isDefined(codePoint));
+	private Predicate<String> allowedHeaderValues = ASSIGNED_AND_NOT_ISO_CONTROL_PREDICATE;
+
+	private Predicate<String> allowedParameterNames = ASSIGNED_AND_NOT_ISO_CONTROL_PREDICATE;
 
 	private Predicate<String> allowedParameterValues = value -> true;
 
@@ -142,7 +145,6 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 		urlBlocklistsAddAll(FORBIDDEN_FORWARDSLASH);
 		urlBlocklistsAddAll(FORBIDDEN_DOUBLE_FORWARDSLASH);
 		urlBlocklistsAddAll(FORBIDDEN_BACKSLASH);
-		urlBlocklistsAddAll(FORBIDDEN_NULL);
 
 		this.encodedUrlBlocklist.add(ENCODED_PERCENT);
 		this.encodedUrlBlocklist.addAll(FORBIDDEN_ENCODED_PERIOD);
@@ -310,24 +312,6 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 			urlBlocklistsRemoveAll(FORBIDDEN_BACKSLASH);
 		} else {
 			urlBlocklistsAddAll(FORBIDDEN_BACKSLASH);
-		}
-	}
-
-	/**
-	 * <p>
-	 * Determines if a null "\0" or a URL encoded nul "%00" should be allowed in
-	 * the path or not. The default is not to allow this behavior because it is a frequent
-	 * source of security exploits.
-	 * </p>
-	 *
-	 * @param allowNull a null "\0" or a URL encoded null "%00" be allowed
-	 * in the path or not. Default is false
-	 */
-	public void setAllowNull(boolean allowNull) {
-		if (allowNull) {
-			urlBlocklistsRemoveAll(FORBIDDEN_NULL);
-		} else {
-			urlBlocklistsAddAll(FORBIDDEN_NULL);
 		}
 	}
 
@@ -635,10 +619,6 @@ public class Gh8644StrictHttpFirewall implements HttpFirewall {
 		}
 
 		return true;
-	}
-
-	private static boolean containsISOControlCharacter(String s) {
-		return s.codePoints().anyMatch(Character::isISOControl);
 	}
 
 	/**

@@ -1,10 +1,12 @@
-package org.springframework.security.web.firewall;
+package org.springframework.security.firewall;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Predicate;
+import java.util.regex.Pattern;
+
 import javax.servlet.http.HttpServletRequest;
 
 import org.openjdk.jmh.annotations.Benchmark;
@@ -16,7 +18,8 @@ import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.State;
 
 import org.springframework.mock.web.MockHttpServletRequest;
-import org.springframework.security.firewall.Gh8644StrictHttpFirewall;
+import org.springframework.security.web.firewall.HttpFirewall;
+import org.springframework.security.web.firewall.StrictHttpFirewall;
 
 @State(Scope.Benchmark)
 @Fork(1)
@@ -24,7 +27,7 @@ import org.springframework.security.firewall.Gh8644StrictHttpFirewall;
 public class Gh8644StrictHttpFirewallTests {
 	private static final int MAX_HEADER_SIZE = 8192;
 
-	private Map<String, HttpServletRequest> requests = new HashMap<String, HttpServletRequest>()
+	private static final Map<String, HttpServletRequest> requests = new HashMap<String, HttpServletRequest>()
 	{{
 		put("largeBody", largeBody());
 		put("largeHeader", largeHeader());
@@ -35,22 +38,54 @@ public class Gh8644StrictHttpFirewallTests {
 
 	@Param({
 			"largeBody",
-			"largeHeader",
-			"largeBodyAndHeader"
+//			"largeHeader",
+//			"largeBodyAndHeader"
 	})
 	private String which;
 
-	private StrictHttpFirewall firewall = new StrictHttpFirewall();
-	private Gh8644StrictHttpFirewall gh8644Firewall = new Gh8644StrictHttpFirewall();
-
-	@Benchmark
-	public HttpServletRequest checkingNoChars() {
-		return firewall.getFirewalledRequest(requests.get(which));
+	private final HttpFirewall strictHttpFirewall = new StrictHttpFirewall();
+	private HttpFirewall gh8644FirewallUsingType = getGh8644StrictHttpFirewall(s -> s.codePoints().allMatch(codePoint -> { final int type = Character.getType(codePoint); return type != Character.CONTROL && type != Character.UNASSIGNED; }));
+	private HttpFirewall gh8644FirewallUsingRegex = getGh8644StrictHttpFirewall(Pattern.compile("[\\p{IsAssigned}&&[^\\p{IsControl}]]*").asMatchPredicate());
+	private HttpFirewall gh8644FirewallUsingCharacterMethods = getGh8644StrictHttpFirewall(s -> s.codePoints().allMatch(codePoint -> !Character.isISOControl(codePoint) && Character.isDefined(codePoint)));
+	private HttpFirewall gh8644FirewallUsingNoOp = getGh8644StrictHttpFirewall(s-> true);
+	private HttpFirewall gh8644FirewallUsingAllMatch = getGh8644StrictHttpFirewall(s-> s.codePoints().allMatch(v -> true));
+	
+	private static HttpFirewall getGh8644StrictHttpFirewall(final Predicate<String> predicate) {
+		Gh8644StrictHttpFirewall firewall = new Gh8644StrictHttpFirewall();
+		firewall.setAllowedHeaderNames(predicate);
+		firewall.setAllowedHeaderValues(predicate);
+		firewall.setAllowedParameterNames(predicate);
+		return firewall;
 	}
 
 	@Benchmark
-	public HttpServletRequest checkingAllChars() {
-		return gh8644Firewall.getFirewalledRequest(requests.get(which));
+	public HttpServletRequest strictHttpFirewall() {
+		return strictHttpFirewall.getFirewalledRequest(requests.get(which));
+	}
+
+	@Benchmark
+	public HttpServletRequest gh8644FirewallUsingType() {
+		return gh8644FirewallUsingType.getFirewalledRequest(requests.get(which));
+	}
+
+	@Benchmark
+	public HttpServletRequest gh8644FirewallUsingRegex() {
+		return gh8644FirewallUsingRegex.getFirewalledRequest(requests.get(which));
+	}
+
+	@Benchmark
+	public HttpServletRequest gh8644FirewallUsingCharacterMethods() {
+		return gh8644FirewallUsingCharacterMethods.getFirewalledRequest(requests.get(which));
+	}
+
+	@Benchmark
+	public HttpServletRequest gh8644FirewallUsingNoOp() {
+		return gh8644FirewallUsingNoOp.getFirewalledRequest(requests.get(which));
+	}
+
+	@Benchmark
+	public HttpServletRequest gh8644FirewallUsingAllMatch() {
+		return gh8644FirewallUsingAllMatch.getFirewalledRequest(requests.get(which));
 	}
 
 	private static MockHttpServletRequest largeBodyAndHeader() {
